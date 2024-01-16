@@ -32,7 +32,7 @@ FastReso::FastReso(const Particle& particle, const Freezeout& freezeout)
 
 void FastReso::calc_EdNd3p() {
   
-  double gdsig, pu, eqdist, mu, temp;
+  double gdsig, pu, eqdist, mu, temp, pbar;
   double pmu[4], umu[4], dSigma[4], pf1[4], pf2[4], gmu[4];
   
   for (size_t pT_idx = 0; pT_idx < pTarr.size(); ++pT_idx) {
@@ -60,7 +60,14 @@ void FastReso::calc_EdNd3p() {
 	  umu[3] = surf.umu.eta;
           
 	  pu = pmu[0]*umu[0] - pmu[1]*umu[1] - pmu[2]*umu[2] - pow(surf.xmu.tau,2)*pmu[3]*umu[3];
-          
+	  pbar = sqrt(pu*pu - particle_.getMass()*particle_.getMass());
+
+	  double f1_ = particle_.interpolated_f1(temp, pbar);
+	  double f2_ = particle_.interpolated_f2(temp, pbar);
+
+	  f1_ = f1_/pbar;
+          f2_ = f2_/pbar;
+		
 	  pf1[0] = pmu[0] - pu*umu[0];
 	  pf1[1] = pmu[1] - pu*umu[1];
 	  pf1[2] = pmu[2] - pu*umu[2];
@@ -69,11 +76,8 @@ void FastReso::calc_EdNd3p() {
 	  pf2[0] = pu*umu[0];
 	  pf2[1] = pu*umu[1];
 	  pf2[2] = pu*umu[2];
-	  pf2[3] = pu*umu[3];
-          
-	  double f1_ = particle_.interpolated_f1(temp, pu);
-	  double f2_ = particle_.interpolated_f2(temp, pu);
-          
+	  pf2[3] = pu*umu[3];       
+	            
 	  gmu[0] = f1_*pf1[0] + f2_*pf2[0] ;
 	  gmu[1] = f1_*pf1[1] + f2_*pf2[1] ;
 	  gmu[2] = f1_*pf1[2] + f2_*pf2[2] ;
