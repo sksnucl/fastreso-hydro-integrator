@@ -24,9 +24,11 @@ private:
   double y_min = -1.0, y_max = 1.0;
   
   // Specify the number of points in each dimension
-  const size_t NpT = 60;  /* Number of points in pT */
-  const size_t Nphi = 40; /* Number of points in phi */
+  const size_t NpT = 20;  /* Number of points in pT */
+  const size_t Nphi = 20; /* Number of points in phi */
   const size_t Ny = 20; /* Number of points in y */
+  
+  double deltapT, deltaphi, deltay;
   
   std::vector<double> pTarr;
   std::vector<double> phiarr;
@@ -40,7 +42,7 @@ private:
   std::vector<std::vector<double> > v4;
   std::vector<double> dNdy;
   
-  void calc_EdNd3p();
+  double calc_EdNd3p(const double& pT, const double& y, const double& phi);
   void calc_dNpTdpTdy();
   void calc_dNdy();
   void calc_vn();
