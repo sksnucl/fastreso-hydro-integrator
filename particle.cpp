@@ -3,86 +3,123 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 #include <gsl/gsl_interp2d.h>
 #include <gsl/gsl_spline2d.h>
 
-Particle::Particle(const std::string& name, double mass, int strangeness, int charmness, int baryonNumber, int charge, int isospin3, int spin)
-  : name_(name), mass_(mass), strangeness_(strangeness), charmness_(charmness), baryonNumber_(baryonNumber), charge_(charge), isospin3_(isospin3), spin_(spin){
-  
-  degen_ = (spin_ + 1)*(isospin3_ + 1);
-  temp = nullptr;
-  pbar = nullptr;
-  
-}
-
-Particle::~Particle() {
-  delete temp;
-  delete pbar;
-  delete f1;
-  delete f2;
-  gsl_spline2d_free(splinef1);
-  gsl_spline2d_free(splinef2);
-  gsl_interp_accel_free(xacc);
-  gsl_interp_accel_free(yacc);
-  delete[] zaf1;
-  delete[] zaf2;
+void Particle::setName(std::string& name) {
+  name_ = name;
 }
 
 std::string Particle::getName() const {
   return name_;
 }
 
+void Particle::setPartId(int pid) {
+  pid_ = pid;
+}
+
+int Particle::getDegen() const {
+  return degen_;
+}
+
+void Particle::setDegen(int degen) {
+  degen_ = degen;
+}
+
+int Particle::getPartId() const {
+  return pid_;
+}
+
+void Particle::setMass(double mass) {
+  mass_ = mass;
+}
+
 double Particle::getMass() const {
   return mass_;
+}
+
+void Particle::setStrangeness(int strangeness) {
+  strangeness_ = strangeness;
 }
 
 int Particle::getStrangeness() const {
   return strangeness_;
 }
 
+void Particle::setBottomness(int bottomness) {
+  bottomness_ = bottomness;
+}
+
+int Particle::getBottomness() const {
+  return bottomness_;
+}
+
+void Particle::setCharmness(int charmness) {
+  charmness_ = charmness;
+}
+
 int Particle::getCharmness() const {
   return charmness_;
+}
+
+void Particle::setBaryonNumber(int baryonNumber) {
+  baryonNumber_ = baryonNumber;
 }
 
 int Particle::getBaryonNumber() const {
   return baryonNumber_;
 }
 
+void Particle::setCharge(int charge) {
+  charge_ = charge;
+}
+
 int Particle::getCharge() const {
   return charge_;
 }
 
-int Particle::getSpin() const {
-  return spin_;
+void Particle::setIsospin3(double isospin3) {
+  isospin3_ = isospin3;
 }
 
-int Particle::getIsospin3() const {
+double Particle::getIsospin3() const {
   return isospin3_;
 }
 
-void Particle::readf1f2(size_t Ntemp,size_t Npbar) {
+void Particle::read_fastreso_components(const std::string& folderpath, const std::vector<double>& temparr, const std::vector<double>& pbararr) {
   
-  temp = new std::vector<double>(Ntemp);
-  pbar = new std::vector<double>(Npbar);
-  f1 = new std::vector<std::vector<double> >(Ntemp, std::vector<double>(Npbar, 0.0));
-  f2 = new std::vector<std::vector<double> >(Ntemp, std::vector<double>(Npbar, 0.0));
+  size_t Ntemp = temparr.size() ;
+  size_t Npbar = pbararr.size() ;
   
-  //std::vector<double>(Ntemp) templist;
-  std::ostringstream filename[Ntemp];
+  temp.resize(Ntemp) ;
+  pbar.resize(Npbar) ;
   
-  for (size_t i = 0; i < Ntemp; ++i) {
-    //templist[i] = mintemp + (maxtemp - mintemp) * static_cast<double>(i) / (Ntemp - 1);
-    //(*temp)[i] = templist[i];
-    
-    (*temp)[i] = mintemp + (maxtemp - mintemp) * static_cast<double>(i) / (Ntemp - 1);
-    
+  temp = temparr;
+  pbar = pbararr;
+  
+  std::sort(temp.begin(), temp.end());
+  
+  mintemp = temp[0];
+  maxtemp = temp[Ntemp-1];
+  minpstar = pbar[0];
+  maxpstar = pbar[Npbar - 1];
+  
+  f1.resize(Ntemp, std::vector<double>(Npbar, 0.0));
+  f2.resize(Ntemp, std::vector<double>(Npbar, 0.0));
+  
+  std::ostringstream filename;
+  
+  for (size_t i = 0; i < Ntemp; ++i) {    
     std::ostringstream ss;
-    ss << std::fixed << std::setprecision(4) << (*temp)[i];
+    ss << std::fixed << std::setprecision(4) << temp[i];
     std::string formattedtemperature = ss.str();
     
-    filename[i] << "../fi_PDG2016+/" + name_ + "_total_T" + formattedtemperature + "_Fj.out";
-    
-    std::ifstream filedata(filename[i].str());
+    filename.str("");
+
+    filename << folderpath + "PDGid_" + std::to_string(pid_) + "_total_T" + formattedtemperature + "_Fj.out";
+   
+    std::ifstream filedata(filename.str());
     
     // Skip the first three lines
     for (int line = 0; line < 3; ++line) {
@@ -92,24 +129,24 @@ void Particle::readf1f2(size_t Ntemp,size_t Npbar) {
       
     double dummymass = 0, dummypbar = 0;
     
-    for (size_t j = 0; j < Npbar; ++j) {
-      if (i == 0) {
-	filedata >> (*pbar)[j] >> dummymass >> (*f1)[i][j] >> (*f2)[i][j];
-      } else {
-	filedata >> dummypbar >> dummymass >> (*f1)[i][j] >> (*f2)[i][j];
-      }
+    for (size_t line = 0; line < Npbar; ++line) {
+      std::string line_data;
+      
+      getline(filedata, line_data);
+      std::istringstream iss(line_data);
+      int j = line-3;
+      iss >> dummypbar >> dummymass >> f1[i][j] >> f2[i][j];
     }
-    
     filedata.close();
   }
   
-  nx = Ntemp; // number of files
-  ny = Npbar; // number of lines in file
+  size_t nx = Ntemp; // number of files
+  size_t ny = Npbar; // number of lines in file
   
   // Allocate memory for arrays
-  zaf1 = new double[nx * ny];
-  zaf2 = new double[nx * ny];
-  
+  double zaf1[Ntemp * Npbar];
+  double zaf2[Ntemp * Npbar];
+      
   // GSL Interpolation setup
   splinef1 = gsl_spline2d_alloc(T, nx, ny);
   splinef2 = gsl_spline2d_alloc(T, nx, ny);
@@ -119,18 +156,21 @@ void Particle::readf1f2(size_t Ntemp,size_t Npbar) {
   // Set GSL Interpolation data
   for (size_t i = 0; i < nx; ++i) {
     for (size_t j = 0; j < ny; ++j) {
-      gsl_spline2d_set(splinef1, zaf1, i, j, (*f1)[i][j]);
-      gsl_spline2d_set(splinef2, zaf2, i, j, (*f2)[i][j]);
+      gsl_spline2d_set(splinef1, zaf1, i, j, f1[i][j]);
+      gsl_spline2d_set(splinef2, zaf2, i, j, f2[i][j]);
     }
   }
   
-  gsl_spline2d_init(splinef1, temp->data(), pbar->data(), zaf1, nx, ny);
-  gsl_spline2d_init(splinef2, temp->data(), pbar->data(), zaf2, nx, ny);
-  
-  maxpstar = (*pbar)[ny - 1];
-  minpstar = (*pbar)[0];
+  gsl_spline2d_init(splinef1, temp.data(), pbar.data(), zaf1, nx, ny);
+  gsl_spline2d_init(splinef2, temp.data(), pbar.data(), zaf2, nx, ny);
 }
 
+void Particle::clear(){
+  gsl_spline2d_free(splinef1);
+  gsl_spline2d_free(splinef2);
+  gsl_interp_accel_free(xacc);
+  gsl_interp_accel_free(yacc);
+}
 
 double Particle::interpolated_f1(double temp_value, double pbar_value) const {
   if (temp_value < mintemp || temp_value > maxtemp || pbar_value < minpstar || pbar_value > maxpstar) {
