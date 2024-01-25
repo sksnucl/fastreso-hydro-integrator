@@ -37,6 +37,22 @@ void Freezeout::readFile(const std::string& datafile) {
     
     mysurface.push_back(fo_surf);
   }
+
+//  double c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16;
+//  
+//  while (surfdata >> fo_surf.xmu.tau >> fo_surf.xmu.x >> fo_surf.xmu.y >> fo_surf.xmu.eta) {
+//    surfdata >> fo_surf.dSigma.tau >> fo_surf.dSigma.x >> fo_surf.dSigma.y >> fo_surf.dSigma.eta;
+//    surfdata >> fo_surf.umu.tau >> fo_surf.umu.x >> fo_surf.umu.y >> fo_surf.umu.eta;
+//    surfdata >> fo_surf.temperature;
+//    
+//    surfdata >> fo_surf.muB >> fo_surf.muQ >> fo_surf.muS >> c1 >> c2;
+//    
+//    surfdata >> c3;
+//    
+//    surfdata >> c4 >> c5 >> c6 >> c7 >> c8 >> c9 >> c10 >> c11 >> c12 >> c13 >> c14 >> c15 >> c16;
+//    
+//    mysurface.push_back(fo_surf);
+//  }
   
   surfdata.close();
   
@@ -53,7 +69,7 @@ double Freezeout::EdNd3p(const Particle& particle, double pT, double y, double p
   
   mT = sqrt(particle.getMass()*particle.getMass()+pT*pT);
   
-  for (int i = 0; i < NumberofCells; ++i) {
+  for (size_t i = 0; i < NumberofCells; ++i) {
     
     surf = mysurface[i];
     
