@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <omp.h>
 
 FastReso::FastReso(const Particle& particle, const Freezeout& freezeout)
   : particle_(particle), freezeout_(freezeout) {
@@ -21,6 +22,10 @@ FastReso::FastReso(const Particle& particle, const Freezeout& freezeout)
     yarr[k] = y_min + (y_max - y_min) * k / (Ny - 1);
   }
   
+  deltapT = (pT_max - pT_min) / (NpT - 1);
+  deltaphi = (phi_max - phi_min) / (Nphi - 1);
+  deltay = (y_max - y_min) / (Ny - 1);
+  
   EdNd3p.resize(NpT, std::vector<std::vector<double>>(Nphi, std::vector<double>(Ny, 0.0)));
   dNpTdpTdy.resize(NpT, std::vector<double>(Ny, 0.0));
   v1.resize(NpT, std::vector<double>(Ny, 0.0));
@@ -30,77 +35,70 @@ FastReso::FastReso(const Particle& particle, const Freezeout& freezeout)
   dNdy.resize(Ny);
 }
 
-void FastReso::calc_EdNd3p() {
+double FastReso::calc_EdNd3p(const double& pT, const double& y, const double& phi) {
   
-  double gdsig, pu, eqdist, mu, temp, pbar;
-  double pmu[4], umu[4], dSigma[4], pf1[4], pf2[4], gmu[4];
-  
-  for (size_t pT_idx = 0; pT_idx < pTarr.size(); ++pT_idx) {
-    double pT = pTarr[pT_idx]; 
-    for (size_t phi_idx = 0; phi_idx < phiarr.size(); ++phi_idx) {
-      double phi = phiarr[phi_idx];
-      for (size_t y_idx = 0; y_idx < yarr.size(); ++y_idx) {
-	double y = yarr[y_idx];
-	double EdNd3p_ = 0.0 ;
-	for (size_t i = 0; i < freezeout_.mysurface.size(); ++i) {
-	  const surface_element& surf = freezeout_.mysurface[i];
-	  
-	  double mT = sqrt(particle_.getMass()*particle_.getMass()+pT*pT);
-	  mu = particle_.getBaryonNumber()*surf.muB + particle_.getStrangeness()*surf.muS + particle_.getCharge()*surf.muQ;
-	  temp = surf.temperature;
-	  
-	  pmu[0] = mT*cosh(y-surf.xmu.eta);
-	  pmu[1] = pT*cos(phi);
-	  pmu[2] = pT*sin(phi);
-	  pmu[3] = mT*sinh(y-surf.xmu.eta)/surf.xmu.tau;
-	  
-	  umu[0] = surf.umu.tau;
-	  umu[1] = surf.umu.x;
-	  umu[2] = surf.umu.y;
-	  umu[3] = surf.umu.eta;
-          
-	  pu = pmu[0]*umu[0] - pmu[1]*umu[1] - pmu[2]*umu[2] - pow(surf.xmu.tau,2)*pmu[3]*umu[3];
-	  pbar = sqrt(pu*pu - particle_.getMass()*particle_.getMass());
-
-	  double f1_ = particle_.interpolated_f1(temp, pbar);
-	  double f2_ = particle_.interpolated_f2(temp, pbar);
-
-	  f1_ = f1_/pbar;
-          f2_ = f2_/pbar;
-		
-	  pf1[0] = pmu[0] - pu*umu[0];
-	  pf1[1] = pmu[1] - pu*umu[1];
-	  pf1[2] = pmu[2] - pu*umu[2];
-	  pf1[3] = pmu[3] - pu*umu[3];
-          
-	  pf2[0] = pu*umu[0];
-	  pf2[1] = pu*umu[1];
-	  pf2[2] = pu*umu[2];
-	  pf2[3] = pu*umu[3];       
-	            
-	  gmu[0] = f1_*pf1[0] + f2_*pf2[0] ;
-	  gmu[1] = f1_*pf1[1] + f2_*pf2[1] ;
-	  gmu[2] = f1_*pf1[2] + f2_*pf2[2] ;
-	  gmu[3] = f1_*pf1[3] + f2_*pf2[3] ;
-	  
-	  dSigma[0] = surf.dSigma.tau;
-	  dSigma[1] = surf.dSigma.x;
-	  dSigma[2] = surf.dSigma.y;
-	  dSigma[3] = surf.dSigma.eta;
-          
-	  gdsig = gmu[0]*dSigma[0] + gmu[1]*dSigma[1] + gmu[2]*dSigma[2] + gmu[3]*dSigma[3];  // GeV fm^3
-          
-	  //degen = (particle_.spin + 1)*(particle_.isospin3 + 1);
-          
-	  // Whether to multiply degen or not?
-	  
-	  EdNd3p_ = EdNd3p_ + gdsig;
-	}   
-        
-	EdNd3p[pT_idx][phi_idx][y_idx] = EdNd3p_;     
-      }
+  double EdNd3p_ = 0.0 ;
+  #pragma omp parallel for reduction(+:EdNd3p_)
+  //for (size_t i = 0; i < 20000; ++i) {
+  for (size_t i = 0; i < freezeout_.mysurface.size(); ++i) {
+    const surface_element& surf = freezeout_.mysurface[i];
+    double particlemass =  particle_.getMass();
+    double mT = sqrt(particlemass*particlemass + pT*pT);
+    double temp = surf.temperature;
+    
+    double pmu[4], umu[4], pu, pbar, pf1[4], pf2[4], gmu[4], dSigma[4], gdsig;
+    
+    pmu[0] = mT*std::cosh(y-surf.xmu.eta);
+    pmu[1] = pT*std::cos(phi);
+    pmu[2] = pT*std::sin(phi);
+    pmu[3] = mT*std::sinh(y-surf.xmu.eta)/surf.xmu.tau;
+    
+    umu[0] = surf.umu.tau;
+    umu[1] = surf.umu.x;
+    umu[2] = surf.umu.y;
+    umu[3] = surf.umu.eta;
+    
+    pu = pmu[0]*umu[0] - pmu[1]*umu[1] - pmu[2]*umu[2] - pow(surf.xmu.tau,2)*pmu[3]*umu[3];
+    
+    if ((pu*pu - particlemass*particlemass) < 0){
+      std::cout << "Error: pbar is NaN" << std::endl;  
+      exit(0);
     }
-  }
+    
+    pbar = std::sqrt(pu*pu - particlemass*particlemass);
+    
+    double f1_ = particle_.interpolated_f1(temp, pbar);
+    double f2_ = particle_.interpolated_f2(temp, pbar);
+    
+    f1_ = f1_/pbar;
+    f2_ = f2_/pbar;
+    
+    pf1[0] = pmu[0] - pu*umu[0];
+    pf1[1] = pmu[1] - pu*umu[1];
+    pf1[2] = pmu[2] - pu*umu[2];
+    pf1[3] = pmu[3] - pu*umu[3];
+    
+    pf2[0] = pu*umu[0];
+    pf2[1] = pu*umu[1];
+    pf2[2] = pu*umu[2];
+    pf2[3] = pu*umu[3];
+    
+    gmu[0] = f1_*pf1[0] + f2_*pf2[0] ;
+    gmu[1] = f1_*pf1[1] + f2_*pf2[1] ;
+    gmu[2] = f1_*pf1[2] + f2_*pf2[2] ;
+    gmu[3] = f1_*pf1[3] + f2_*pf2[3] ;
+    
+    dSigma[0] = surf.dSigma.tau;
+    dSigma[1] = surf.dSigma.x;
+    dSigma[2] = surf.dSigma.y;
+    dSigma[3] = surf.dSigma.eta;
+    
+    gdsig = gmu[0]*dSigma[0] + gmu[1]*dSigma[1] + gmu[2]*dSigma[2] + gmu[3]*dSigma[3];  // GeV fm^3
+    
+    EdNd3p_ = EdNd3p_ + particle_.getDegen()*gdsig/(pow(2*M_PI,3)); //(pow(2*M_PI,3)*pow(0.197,3));
+  }   
+  
+  return EdNd3p_;     // GeV^[-2]
 }
 
 void FastReso::calc_dNpTdpTdy() {
@@ -138,7 +136,7 @@ void FastReso::calc_vn() {
       double den = 0.0;
       for (size_t phi_idx = 0; phi_idx < phiarr.size() - 1; ++phi_idx) {
 	double delta_phi = phiarr[phi_idx + 1] - phiarr[phi_idx];
-	double mid_phi = (phiarr[phi_idx + 1] + phiarr[phi_idx]) / 2.0;
+	//double mid_phi = (phiarr[phi_idx + 1] + phiarr[phi_idx]) / 2.0;
         
 	num1 += (std::cos(phiarr[phi_idx]) * EdNd3p[pT_idx][phi_idx][y_idx]
                  + std::cos(phiarr[phi_idx + 1]) * EdNd3p[pT_idx][phi_idx + 1][y_idx]) * delta_phi/ 2.0;
@@ -161,10 +159,24 @@ void FastReso::calc_vn() {
 }
 
 void FastReso::calc_observables() {
-  calc_EdNd3p() ;
+
+  for (size_t pT_idx = 0; pT_idx < pTarr.size(); ++pT_idx) {
+    double pT = pTarr[pT_idx]; 
+    std::cout << pT << std::endl;
+    for (size_t y_idx = 0; y_idx < yarr.size(); ++y_idx) {
+      double y = yarr[y_idx];
+      // Integrate over phi
+      for (size_t phi_idx = 0; phi_idx < phiarr.size() - 1; ++phi_idx) {
+        double phi = phiarr[phi_idx];
+        double EdNd3p_ = calc_EdNd3p(pT, y, phi);
+        EdNd3p[pT_idx][phi_idx][y_idx] = EdNd3p_;
+      }
+    }
+  }
+  
   calc_dNpTdpTdy();
   calc_dNdy();
-  calc_vn();
+  //calc_vn();
 }
 
 void FastReso::output() {
