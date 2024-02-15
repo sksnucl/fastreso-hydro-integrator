@@ -3,8 +3,6 @@
 
 #include <vector>
 #include <string>
-#include <gsl/gsl_interp2d.h>
-#include <gsl/gsl_spline2d.h>
 
 class Particle {
 public:
@@ -33,11 +31,10 @@ public:
   void setDegen(int degen);
   void setIsospin3(double isospin);
   
-  void read_fastreso_components(const std::string& folderpath, const std::vector<double>& temparr, const std::vector<double>& pbararr);
-  void clear();
+  void read_fastreso_components(const size_t& decayflag, const std::string& folderpath, const std::vector<double>& temparr, const std::vector<double>& pbararr);
   
-  double interpolated_f1(double temp_value, double pbar_value) const;
-  double interpolated_f2(double temp_value, double pbar_value) const;
+  std::vector<std::vector<double> > f1;
+  std::vector<std::vector<double> > f2;
   
 private:
   std::string name_;
@@ -52,20 +49,6 @@ private:
   int degen_;
   int partid_;
   
-  std::vector<double> temp;
-  std::vector<double> pbar;
-  std::vector<std::vector<double> > f1;
-  std::vector<std::vector<double> > f2;
-  
-  const gsl_interp2d_type *T = gsl_interp2d_bilinear;
-  gsl_spline2d *splinef1 ;
-  gsl_spline2d *splinef2 ;
-  gsl_interp_accel *xacc ;
-  gsl_interp_accel *yacc ;
-  double maxpstar;
-  double minpstar;
-  double mintemp;
-  double maxtemp;
 };
 
 #endif
