@@ -35,11 +35,11 @@ FastReso::FastReso(const Particle& particle, const Freezeout& freezeout)
   dNdy.resize(Ny);
 }
 
-double FastReso::calc_EdNd3p(const double& pT, const double& y, const double& phi) {
+double FastReso::calc_EdNd3p(const double& pT, const double& y, const double& phi, gsl_spline2d *splinef1, gsl_spline2d *splinef2, gsl_interp_accel *xacc, gsl_interp_accel *yacc, const double& mint, const double& maxt, const double& minp, const double& maxp) {
   
   double EdNd3p_ = 0.0 ;
   #pragma omp parallel for reduction(+:EdNd3p_)
-  //for (size_t i = 0; i < 20000; ++i) {
+  
   for (size_t i = 0; i < freezeout_.mysurface.size(); ++i) {
     const surface_element& surf = freezeout_.mysurface[i];
     double particlemass =  particle_.getMass();
@@ -67,8 +67,22 @@ double FastReso::calc_EdNd3p(const double& pT, const double& y, const double& ph
     
     pbar = std::sqrt(pu*pu - particlemass*particlemass);
     
-    double f1_ = particle_.interpolated_f1(temp, pbar);
-    double f2_ = particle_.interpolated_f2(temp, pbar);
+    double f1_, f2_;
+    
+    if (temp > mint && temp < maxt && pbar > minp && pbar < maxp) {
+      f1_ = gsl_spline2d_eval(splinef1, temp, pbar, xacc, yacc);
+      f2_ = gsl_spline2d_eval(splinef2, temp, pbar, xacc, yacc);
+    }else{
+      f1_ = 0.0;
+      f2_ = 0.0;
+    }
+//    if (temp < mint || temp > maxt || pbar < minp || pbar > maxp) {
+//      f1_ = 0.0;
+//      f2_ = 0.0;
+//    } else {
+//      f1_ = gsl_spline2d_eval(splinef1, temp, pbar, xacc, yacc);
+//      f2_ = gsl_spline2d_eval(splinef2, temp, pbar, xacc, yacc);
+//    }
     
     f1_ = f1_/pbar;
     f2_ = f2_/pbar;
@@ -95,7 +109,7 @@ double FastReso::calc_EdNd3p(const double& pT, const double& y, const double& ph
     
     gdsig = gmu[0]*dSigma[0] + gmu[1]*dSigma[1] + gmu[2]*dSigma[2] + gmu[3]*dSigma[3];  // GeV fm^3
     
-    EdNd3p_ = EdNd3p_ + particle_.getDegen()*gdsig/(pow(2*M_PI,3)); //(pow(2*M_PI,3)*pow(0.197,3));
+    EdNd3p_ = EdNd3p_ + particle_.getDegen()*gdsig/(pow(2*M_PI,3)*pow(0.197,3)); //(pow(2*M_PI,3)); 
   }   
   
   return EdNd3p_;     // GeV^[-2]
@@ -158,7 +172,7 @@ void FastReso::calc_vn() {
   }
 }
 
-void FastReso::calc_observables() {
+void FastReso::calc_observables(gsl_spline2d *splinef1, gsl_spline2d *splinef2, gsl_interp_accel *xacc, gsl_interp_accel *yacc, const double& mint, const double& maxt, const double& minp, const double& maxp) {
 
   for (size_t pT_idx = 0; pT_idx < pTarr.size(); ++pT_idx) {
     double pT = pTarr[pT_idx]; 
@@ -166,24 +180,29 @@ void FastReso::calc_observables() {
     for (size_t y_idx = 0; y_idx < yarr.size(); ++y_idx) {
       double y = yarr[y_idx];
       // Integrate over phi
-      for (size_t phi_idx = 0; phi_idx < phiarr.size() - 1; ++phi_idx) {
+      for (size_t phi_idx = 0; phi_idx < phiarr.size(); ++phi_idx) {
         double phi = phiarr[phi_idx];
-        double EdNd3p_ = calc_EdNd3p(pT, y, phi);
+        double EdNd3p_ = calc_EdNd3p(pT, y, phi, splinef1, splinef2, xacc, yacc, mint, maxt, minp, maxp);
         EdNd3p[pT_idx][phi_idx][y_idx] = EdNd3p_;
       }
     }
   }
   
-  calc_dNpTdpTdy();
-  calc_dNdy();
+  //calc_dNpTdpTdy();
+  //calc_dNdy();
   //calc_vn();
 }
 
-void FastReso::output() {
+void FastReso::output(const size_t& decayflag) {
   std::ostringstream filenameStream;
-  filenameStream << particle_.getName() << "_dNpTdpTdy_vn.dat";
-  std::string filename = filenameStream.str();
+  // Compute only pT dependent quantities at rapidity 0
+  if(decayflag==0){
+    filenameStream << particle_.getName() << "_dNpTdpTdy_vn_thermal.dat";
+  }else{
+    filenameStream << particle_.getName() << "_dNpTdpTdy_vn_total.dat";
+  }
   
+  std::string filename = filenameStream.str();
   std::ofstream outputfile(filename);
   
   if (!outputfile.is_open()) {
@@ -191,23 +210,52 @@ void FastReso::output() {
     return;
   }
   
-  outputfile << "#pT\t\t y\t\t dNpTdpTdy\t\t v1\t\t v2\t\t v3\t\t v4\n";
+  outputfile << "#pT \t\t dNpTdpTdy \t\t v1\t\t v2\t\t v3\t\t v4\n";
+  size_t y_idx = (Ny-1)/2;
   
   for (size_t pT_idx = 0; pT_idx < pTarr.size(); ++pT_idx) {
-    for (size_t y_idx = 0; y_idx < yarr.size(); ++y_idx) {
-      outputfile << pTarr[pT_idx] << "\t" << yarr[y_idx] << "\t" 
-                 << dNpTdpTdy[pT_idx][y_idx] << "\t" << v1[pT_idx][y_idx] 
-                 << "\t" << v2[pT_idx][y_idx] << "\t" << v3[pT_idx][y_idx] 
-                 << "\t" << v4[pT_idx][y_idx] << "\n";
+    double v1cos = 0.0, v2cos = 0.0, v3cos = 0.0, v4cos = 0.0;
+    double v1sin = 0.0, v2sin = 0.0, v3sin = 0.0, v4sin = 0.0;
+    double den = 0.0;
+    for (size_t phi_idx = 0; phi_idx < phiarr.size() - 1 ; ++phi_idx) {
+      double delta_phi = phiarr[phi_idx + 1] - phiarr[phi_idx];
+      
+      v1cos += (std::cos(phiarr[phi_idx]) * EdNd3p[pT_idx][phi_idx][y_idx]
+               + std::cos(phiarr[phi_idx + 1]) * EdNd3p[pT_idx][phi_idx + 1][y_idx]) * delta_phi/ 2.0;
+      v2cos += (std::cos(2 * phiarr[phi_idx]) * EdNd3p[pT_idx][phi_idx][y_idx] 
+               + std::cos(2 * phiarr[phi_idx + 1]) * EdNd3p[pT_idx][phi_idx + 1][y_idx]) * delta_phi/ 2.0;
+      v3cos += (std::cos(3 * phiarr[phi_idx]) * EdNd3p[pT_idx][phi_idx][y_idx]
+               + std::cos(3 * phiarr[phi_idx + 1]) * EdNd3p[pT_idx][phi_idx + 1][y_idx]) * delta_phi/ 2.0;
+      v4cos += (std::cos(4 * phiarr[phi_idx]) * EdNd3p[pT_idx][phi_idx][y_idx] 
+               + std::cos(4 * phiarr[phi_idx + 1]) * EdNd3p[pT_idx][phi_idx + 1][y_idx]) * delta_phi/ 2.0;
+      v1sin += (std::sin(phiarr[phi_idx]) * EdNd3p[pT_idx][phi_idx][y_idx]
+               + std::sin(phiarr[phi_idx + 1]) * EdNd3p[pT_idx][phi_idx + 1][y_idx]) * delta_phi/ 2.0;
+      v2sin += (std::sin(2 * phiarr[phi_idx]) * EdNd3p[pT_idx][phi_idx][y_idx] 
+               + std::sin(2 * phiarr[phi_idx + 1]) * EdNd3p[pT_idx][phi_idx + 1][y_idx]) * delta_phi/ 2.0;
+      v3sin += (std::sin(3 * phiarr[phi_idx]) * EdNd3p[pT_idx][phi_idx][y_idx]
+               + std::sin(3 * phiarr[phi_idx + 1]) * EdNd3p[pT_idx][phi_idx + 1][y_idx]) * delta_phi/ 2.0;
+      v4sin += (std::sin(4 * phiarr[phi_idx]) * EdNd3p[pT_idx][phi_idx][y_idx] 
+               + std::sin(4 * phiarr[phi_idx + 1]) * EdNd3p[pT_idx][phi_idx + 1][y_idx]) * delta_phi/ 2.0;
+      den += (EdNd3p[pT_idx][phi_idx][y_idx] + EdNd3p[pT_idx][phi_idx + 1][y_idx]) * delta_phi / 2.0;
+    }
+    if (den != 0.0) {
+      outputfile << pTarr[pT_idx] << "\t" << den << "\t" << v1cos/den << "\t" << v1sin/den
+                 << "\t" << v2cos/den << "\t" << v2sin/den << "\t" << v3cos/den
+                 << "\t" << v3sin/den << "\t" << v4cos/den << "\t" << v4sin/den << "\n";
     }
   }
   
   outputfile.close();
   
+  // Compute only y dependent quantities by integrating over pT and phi
   filenameStream.str(""); // Clear the stream
-  filenameStream << particle_.getName() << "_dNdy.dat";
+  if(decayflag==0){
+    filenameStream << particle_.getName() << "_dNdy_vn_thermal.dat";
+  }else{
+    filenameStream << particle_.getName() << "_dNdy_vn_total.dat";
+  }
+
   filename = filenameStream.str();
-  
   std::ofstream outputfile2(filename);
   
   if (!outputfile2.is_open()) {
@@ -215,11 +263,104 @@ void FastReso::output() {
     return;
   }
   
-  outputfile2 << "#y\t\t dNdy\n";
+  outputfile2 << "#y\t\t dNdy\t\t v1\t\t v2\t\t v3\t\t v4\n";
   
   for (size_t y_idx = 0; y_idx < yarr.size(); ++y_idx) {
-    outputfile2 << yarr[y_idx] << "\t" << dNdy[y_idx] << "\n";
-  }
-  
+    double v1cos = 0.0, v2cos = 0.0, v3cos = 0.0, v4cos = 0.0;
+    double v1sin = 0.0, v2sin = 0.0, v3sin = 0.0, v4sin = 0.0;
+    double den = 0.0;
+    for (size_t pT_idx = 0; pT_idx < pTarr.size() - 1; ++pT_idx) {
+      for (size_t phi_idx = 0; phi_idx < phiarr.size() - 1 ; ++phi_idx) {
+        double delta_phi = phiarr[phi_idx + 1] - phiarr[phi_idx];
+        double delta_pT = pTarr[pT_idx + 1] - pTarr[pT_idx];
+      
+        v1cos += (std::cos(phiarr[phi_idx]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx][y_idx]
+                 + std::cos(phiarr[phi_idx + 1]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx + 1][y_idx]
+                 + std::cos(phiarr[phi_idx]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx][y_idx]
+                 + std::cos(phiarr[phi_idx + 1]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx + 1][y_idx]) * delta_pT * delta_phi/ 4.0;
+        v2cos += (std::cos(2 * phiarr[phi_idx]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx][y_idx] 
+                 + std::cos(2 * phiarr[phi_idx + 1]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx + 1][y_idx]
+                 + std::cos(2 * phiarr[phi_idx]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx][y_idx] 
+                 + std::cos(2 * phiarr[phi_idx + 1]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx + 1][y_idx])* delta_pT * delta_phi/ 4.0;
+        v3cos += (std::cos(3 * phiarr[phi_idx]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx][y_idx]
+                 + std::cos(3 * phiarr[phi_idx + 1]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx + 1][y_idx]
+                 + std::cos(3 * phiarr[phi_idx]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx][y_idx]
+                 + std::cos(3 * phiarr[phi_idx + 1]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx + 1][y_idx])* delta_pT * delta_phi/ 4.0;
+        v4cos += (std::cos(4 * phiarr[phi_idx]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx][y_idx] 
+                 + std::cos(4 * phiarr[phi_idx + 1]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx + 1][y_idx]
+                 + std::cos(4 * phiarr[phi_idx]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx][y_idx] 
+                 + std::cos(4 * phiarr[phi_idx + 1]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx + 1][y_idx])* delta_pT * delta_phi/ 4.0;
+        v1sin += (std::sin(phiarr[phi_idx]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx][y_idx]
+                 + std::sin(phiarr[phi_idx + 1]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx + 1][y_idx]
+                 + std::sin(phiarr[phi_idx]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx][y_idx]
+                 + std::sin(phiarr[phi_idx + 1]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx + 1][y_idx])* delta_pT * delta_phi/ 4.0;
+        v2sin += (std::sin(2 * phiarr[phi_idx]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx][y_idx] 
+                 + std::sin(2 * phiarr[phi_idx + 1]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx + 1][y_idx]
+                 + std::sin(2 * phiarr[phi_idx]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx][y_idx] 
+                 + std::sin(2 * phiarr[phi_idx + 1]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx + 1][y_idx])* delta_pT * delta_phi/ 4.0;
+        v3sin += (std::sin(3 * phiarr[phi_idx]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx][y_idx]
+                 + std::sin(3 * phiarr[phi_idx + 1]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx + 1][y_idx]
+                 + std::sin(3 * phiarr[phi_idx]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx][y_idx]
+                 + std::sin(3 * phiarr[phi_idx + 1]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx + 1][y_idx])* delta_pT * delta_phi/ 4.0;
+        v4sin += (std::sin(4 * phiarr[phi_idx]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx][y_idx] 
+                 + std::sin(4 * phiarr[phi_idx + 1]) * pTarr[pT_idx] * EdNd3p[pT_idx][phi_idx + 1][y_idx]
+                 + std::sin(4 * phiarr[phi_idx]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx][y_idx] 
+                 + std::sin(4 * phiarr[phi_idx + 1]) * pTarr[pT_idx + 1] * EdNd3p[pT_idx + 1][phi_idx + 1][y_idx])* delta_pT * delta_phi/ 4.0;
+        den += (EdNd3p[pT_idx][phi_idx][y_idx] * pTarr[pT_idx] + EdNd3p[pT_idx][phi_idx + 1][y_idx] * pTarr[pT_idx]
+                 + EdNd3p[pT_idx + 1][phi_idx][y_idx] * pTarr[pT_idx + 1] 
+                 + EdNd3p[pT_idx + 1][phi_idx + 1][y_idx] * pTarr[pT_idx + 1])* delta_pT * delta_phi/ 4.0;
+      }
+    }
+    if (den != 0.0) {
+      outputfile2 << yarr[y_idx] << "\t" << den << "\t" << v1cos/den << "\t" << v1sin/den
+                  << "\t" << v2cos/den << "\t" << v2sin/den << "\t" << v3cos/den
+                  << "\t" << v3sin/den << "\t" << v4cos/den << "\t" << v4sin/den << "\n";
+    }
+  }  
   outputfile2.close();
 }
+
+//void FastReso::output() {
+//  std::ostringstream filenameStream;
+//  filenameStream << particle_.getName() << "_dNpTdpTdy_vn.dat";
+//  std::string filename = filenameStream.str();
+//  
+//  std::ofstream outputfile(filename);
+//  
+//  if (!outputfile.is_open()) {
+//    std::cerr << "Error opening file: " << filename << std::endl;
+//    return;
+//  }
+//  
+//  outputfile << "#pT\t\t y\t\t dNpTdpTdy\t\t v1\t\t v2\t\t v3\t\t v4\n";
+//  
+//  for (size_t pT_idx = 0; pT_idx < pTarr.size(); ++pT_idx) {
+//    for (size_t y_idx = 0; y_idx < yarr.size(); ++y_idx) {
+//      outputfile << pTarr[pT_idx] << "\t" << yarr[y_idx] << "\t" 
+//                 << dNpTdpTdy[pT_idx][y_idx] << "\t" << v1[pT_idx][y_idx] 
+//                 << "\t" << v2[pT_idx][y_idx] << "\t" << v3[pT_idx][y_idx] 
+//                 << "\t" << v4[pT_idx][y_idx] << "\n";
+//    }
+//  }
+//  
+//  outputfile.close();
+//  
+//  filenameStream.str(""); // Clear the stream
+//  filenameStream << particle_.getName() << "_dNdy.dat";
+//  filename = filenameStream.str();
+//  
+//  std::ofstream outputfile2(filename);
+//  
+//  if (!outputfile2.is_open()) {
+//    std::cerr << "Error opening file: " << filename << std::endl;
+//    return;
+//  }
+//  
+//  outputfile2 << "#y\t\t dNdy\n";
+//  
+//  for (size_t y_idx = 0; y_idx < yarr.size(); ++y_idx) {
+//    outputfile2 << yarr[y_idx] << "\t" << dNdy[y_idx] << "\n";
+//  }
+//  
+//  outputfile2.close();
+//}
