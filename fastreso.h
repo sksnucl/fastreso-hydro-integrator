@@ -47,9 +47,7 @@ private:
   
   double calc_EdNd3p(const double& pT, const double& y, const double& phi, gsl_spline2d *splinef1, gsl_spline2d *splinef2, gsl_interp_accel *xacc, gsl_interp_accel *yacc, const double& mint, const double& maxt, const double& minp, const double& maxp);
   double calc_EdNd3p_cart(const double& pT, const double& y, const double& phi, gsl_spline2d *splinef1, gsl_spline2d *splinef2, gsl_interp_accel *xacc, gsl_interp_accel *yacc, const double& mint, const double& maxt, const double& minp, const double& maxp);
-  void calc_dNpTdpTdy();
-  void calc_dNdy();
-  void calc_vn();
+
 };
 
 #endif
