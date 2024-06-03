@@ -50,6 +50,7 @@ struct surface_element{
   double muQ;
   double bulk;
   SymmetricTensor shear;
+  double dbeta[4][4];
 };
 
 class Freezeout {
@@ -65,6 +66,7 @@ public:
 private:
   std::string filename_;
   void readFile(const std::string& dataFile);
+  void readFileCart(const std::string& datafile);
 };
 
 #endif
