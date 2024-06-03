@@ -7,14 +7,18 @@
 #include <algorithm>
 #include "freezeout.h"
 #include "fastreso.h"
+#include <omp.h>
 
+// Function to read the files from folderPath containing the FastReso data. Depending on the 
+// value of decayflag, the function looks for string total/thermal in the filename, extracts
+// the PDGid, temperature and pbar value and populate the arrays particles, templist & pbarlist
 void getArrays(const size_t& decayflag, const std::string& folderPath, std::vector<Particle>& particles,
                    std::vector<double>& templist, std::vector<double>& pbarlist) {
 
   bool firstfile = false;
 
-  std::vector<int> pdglist;
-  std::vector<std::string> filenames;
+  std::vector<int> pdglist; // vector array to store unique PDG id's
+  std::vector<std::string> filenames; // vector array to store filenames
   std::string findstr;
   
   if(decayflag == 0){
@@ -27,7 +31,6 @@ void getArrays(const size_t& decayflag, const std::string& folderPath, std::vect
     if (entry.is_regular_file()) {
       std::string filename = entry.path().filename().string();
       
-      //if(filename.find("total") != std::string::npos) {
       if(filename.find(findstr) != std::string::npos) {
         filenames.push_back(filename);
 	
@@ -38,7 +41,7 @@ void getArrays(const size_t& decayflag, const std::string& folderPath, std::vect
         
 	auto ip = std::find(pdglist.begin(), pdglist.end(), pdgid);
         
-	if(ip == pdglist.end()){
+	if(ip == pdglist.end()){// check if ip reached the end of pdglist meaning it is not present
 	  pdglist.push_back(pdgid) ;
 	  std::ifstream filedata(folderPath+filename);
 	  
@@ -119,19 +122,18 @@ gsl_spline2d* create_spline(const std::vector<double>& xa, const std::vector<dou
     return spline;
 }
 
-// main program
-
 int main(int argc, char *argv[]) {
   
   if (argc < 4) {
-    //std::cout << "You did not provide the folder path." << std::endl;
     std::cerr << "Not all input arguments provided." << std::endl;
-    //std::cerr << "Syntax: " << argv[0] << " <folder_path>" << std::endl;
     return 1; 
   }
   
+  // Set number of parallel threads for computation
+  omp_set_num_threads(55);
+  
   size_t decayflag = std::stoi(argv[1]); // Flag for thermal or total
-  std::string folderPath = argv[2];
+  std::string folderPath = argv[2]; // Folder containing the FastReso output
   std::string fofile = argv[3];  // Name+Path of freezeout file
   
   // define the freezeout object
@@ -141,13 +143,15 @@ int main(int argc, char *argv[]) {
   std::vector<Particle> particles;
   std::vector<double> templist;
   std::vector<double> pbarlist;
-  
+
+  // Call function to populate the arrays particles, templist, pbarlist
   getArrays(decayflag, folderPath, particles, templist, pbarlist);
   
   std::cout << "Number of particles: " << particles.size() << std::endl;
   std::cout << "Number of temp: " << templist.size() << std::endl;
   std::cout << "Number of pbar: " << pbarlist.size() << std::endl;
   
+  // Define stuff for 2D interpolation from GSL
   const gsl_interp2d_type *T = gsl_interp2d_bilinear;
   size_t Ntemp = templist.size();
   size_t Npbar = pbarlist.size();
@@ -165,6 +169,7 @@ int main(int argc, char *argv[]) {
   gsl_interp_accel *xacc = gsl_interp_accel_alloc();
   gsl_interp_accel *yacc = gsl_interp_accel_alloc();
   
+  // Loop over particles, read the corresponding FastReso components and compute spectra
   for (size_t i = 0; i < particles.size(); ++i) {
     std::cout << particles[i].getPartId() << " " << particles[i].getName() <<std::endl;
     particles[i].read_fastreso_components(decayflag, folderPath, templist, pbarlist);
@@ -173,8 +178,6 @@ int main(int argc, char *argv[]) {
       for (size_t l = 0; l < Npbar; ++l) {
         zaf1[l*Ntemp + k] = particles[i].f1[k][l];
         zaf2[l*Ntemp + k] = particles[i].f2[k][l];
-        //gsl_spline2d_set(splinef1, zaf1.data(), k, l, particles[i].f1[k][l]);
-        //gsl_spline2d_set(splinef2, zaf2.data(), k, l, particles[i].f2[k][l]);
       }
     }
 
