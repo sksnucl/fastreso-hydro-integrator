@@ -6,8 +6,6 @@
 
 class Particle {
 public:
-  //Particle();
-  //~Particle();
   
   std::string getName() const;
   double getMass() const;
