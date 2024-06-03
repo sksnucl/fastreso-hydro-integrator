@@ -56,13 +56,10 @@ struct surface_element{
 class Freezeout {
 public:
   Freezeout(const std::string& filename);
-  //~Freezeout();
-  
+    
   std::vector<surface_element> mysurface;
   size_t NumberofCells;
-  
-  double EdNd3p(const Particle& particle, double pT, double y, double phi, int eps);
-  
+    
 private:
   std::string filename_;
   void readFile(const std::string& dataFile);
